@@ -56,6 +56,8 @@
   <div class="tabs">
     <button class="tab-btn active" data-tab="input">입력</button>
     <button class="tab-btn" data-tab="summary">요약</button>
+    <button class="tab-btn" data-tab="per100">100mL당 가격</button>
+    <button class="tab-btn" data-tab="brand">브랜드별</button>
   </div>
 </header>
 
@@ -111,6 +113,31 @@
       <canvas id="histChart" height="90"></canvas>
     </div>
   </section>
+
+  <section id="tab-per100" style="display:none">
+    <div class="card">
+      <div class="row">
+        <label for="per100Date">조회 날짜</label>
+        <select id="per100Date"></select>
+        <span class="muted">단량별 표에 100mL당 단가만 표시합니다 (조회 전용).</span>
+      </div>
+    </div>
+    <div id="per100Sections"></div>
+  </section>
+
+  <section id="tab-brand" style="display:none">
+    <div class="card">
+      <div class="row">
+        <label for="brandSelectTab">브랜드</label>
+        <select id="brandSelectTab"></select>
+        <label for="brandDate">조회 날짜</label>
+        <select id="brandDate"></select>
+      </div>
+    </div>
+    <div class="card">
+      <div class="table-wrap"><table id="brandTable"><thead><tr><th>단량</th><th>병수</th><th>가격</th><th>100mL당</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
 </main>
 
 <div class="toast" id="toast"></div>
@@ -136,6 +163,8 @@ if (!API_URL) document.getElementById('configWarning').style.display = 'block';
 
 function keyOf(capL, bc, brand) { return capL + '|' + bc + '|' + brand; }
 function per100(price, capL) { return Math.round((price / (capL*1000/100)) * 100) / 100; }
+function fmtNum(n) { return (n === null || n === undefined || isNaN(n)) ? '' : Number(n).toLocaleString('ko-KR'); }
+function parseNum(s) { const v = parseFloat(String(s).replace(/,/g, '')); return isNaN(v) ? NaN : v; }
 function todayStr() {
   const d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
@@ -147,13 +176,17 @@ function showToast(msg) {
 }
 
 // ---------------- 탭 전환 ----------------
+const TAB_IDS = ['input', 'summary', 'per100', 'brand'];
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    document.getElementById('tab-input').style.display = btn.dataset.tab === 'input' ? '' : 'none';
-    document.getElementById('tab-summary').style.display = btn.dataset.tab === 'summary' ? '' : 'none';
+    TAB_IDS.forEach(id => {
+      document.getElementById('tab-' + id).style.display = (btn.dataset.tab === id) ? '' : 'none';
+    });
     if (btn.dataset.tab === 'summary') loadSummary();
+    if (btn.dataset.tab === 'per100') loadPer100Tab();
+    if (btn.dataset.tab === 'brand') loadBrandTab();
   });
 });
 
@@ -190,14 +223,24 @@ function buildInputSections() {
       CONFIG.brands.forEach((brand, cIdx) => {
         const td = document.createElement('td');
         const input = document.createElement('input');
-        input.type = 'number';
+        input.type = 'text';
+        input.inputMode = 'numeric';
         input.dataset.capL = cap.L;
         input.dataset.bc = bc;
         input.dataset.brand = brand;
         input.dataset.row = rIdx;
         input.dataset.col = cIdx;
         input.placeholder = '-';
-        input.addEventListener('input', () => updatePer100Label(td, input));
+        input.addEventListener('input', () => {
+          const caret = input.selectionStart;
+          const before = input.value.length;
+          const num = parseNum(input.value);
+          input.value = isNaN(num) ? input.value.replace(/[^0-9]/g, '') : fmtNum(num);
+          const after = input.value.length;
+          const newCaret = Math.max(0, caret + (after - before));
+          input.setSelectionRange(newCaret, newCaret);
+          updatePer100Label(td, input);
+        });
         input.addEventListener('paste', (e) => handlePaste(e, table, rIdx, cIdx));
         td.appendChild(input);
         const per = document.createElement('div');
@@ -216,9 +259,9 @@ function buildInputSections() {
 
 function updatePer100Label(td, input) {
   const per = td.querySelector('.per100');
-  const v = parseFloat(input.value);
+  const v = parseNum(input.value);
   if (!isNaN(v) && v > 0) {
-    per.textContent = per100(v, parseFloat(input.dataset.capL)) + '/100mL';
+    per.textContent = fmtNum(per100(v, parseFloat(input.dataset.capL))) + '/100mL';
   } else {
     per.textContent = '';
   }
@@ -240,7 +283,8 @@ function handlePaste(e, table, rIdx, cIdx) {
       if (targetRow > maxRow || targetCol > maxCol) return;
       const target = table.querySelector(`input[data-row="${targetRow}"][data-col="${targetCol}"]`);
       if (target && val.trim() !== '') {
-        target.value = val.trim();
+        const num = parseNum(val);
+        target.value = isNaN(num) ? val.trim() : fmtNum(num);
         updatePer100Label(target.closest('td'), target);
       }
     });
@@ -252,8 +296,8 @@ function fillPrefill() {
     const k = keyOf(parseFloat(input.dataset.capL), Number(input.dataset.bc), input.dataset.brand);
     const v = gridValues[k];
     if (v) {
-      input.value = v.price;
-      input.placeholder = v.price;
+      input.value = fmtNum(v.price);
+      input.placeholder = fmtNum(v.price);
       updatePer100Label(input.closest('td'), input);
     }
   });
@@ -272,12 +316,13 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
   if (!date) { alert('날짜를 선택하세요.'); return; }
   const entries = [];
   document.querySelectorAll('#inputSections input').forEach(input => {
-    if (input.value !== '') {
+    const num = parseNum(input.value);
+    if (input.value !== '' && !isNaN(num)) {
       entries.push({
         capacity_L: parseFloat(input.dataset.capL),
         bottle_count: Number(input.dataset.bc),
         brand: input.dataset.brand,
-        price: Number(input.value)
+        price: num
       });
     }
   });
@@ -349,8 +394,8 @@ function renderChanges(res) {
       const diff = c.cur_per100 - c.prev_per100;
       const tr = document.createElement('tr');
       tr.innerHTML = `<td>${capLabel}</td><td>${c.bottle_count}</td><td>${c.brand}</td>
-        <td>${c.prev_per100}</td><td>${c.cur_per100}</td>
-        <td class="${diff>0?'up':'down'}">${diff>0?'▲':'▼'} ${Math.abs(diff).toFixed(2)}</td>`;
+        <td>${fmtNum(c.prev_per100)}</td><td>${fmtNum(c.cur_per100)}</td>
+        <td class="${diff>0?'up':'down'}">${diff>0?'▲':'▼'} ${fmtNum(Math.abs(diff).toFixed(2))}</td>`;
       tbody.appendChild(tr);
     });
 }
@@ -368,7 +413,7 @@ function renderRanking(ranking) {
     r.list.forEach((item, idx) => {
       const li = document.createElement('li');
       if (item.brand === CONFIG.ownBrand) li.classList.add('own');
-      li.innerHTML = `<span>${idx+1}. ${item.brand}</span><span>${item.price_per_100ml}</span>`;
+      li.innerHTML = `<span>${idx+1}. ${item.brand}</span><span>${fmtNum(item.price_per_100ml)}</span>`;
       ul.appendChild(li);
     });
     box.appendChild(ul);
@@ -380,8 +425,8 @@ function renderOwnPosition(ownPosition) {
   tbody.innerHTML = '';
   (ownPosition || []).forEach(o => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${o.capacity_label}</td><td>${o.bottle_count}</td><td>${o.own_per100}</td>
-      <td>${o.rank}/${o.total+1}</td><td>${o.min}</td><td>${o.avg}</td><td>${o.max}</td>`;
+    tr.innerHTML = `<td>${o.capacity_label}</td><td>${o.bottle_count}</td><td>${fmtNum(o.own_per100)}</td>
+      <td>${o.rank}/${o.total+1}</td><td>${fmtNum(o.min)}</td><td>${fmtNum(o.avg)}</td><td>${fmtNum(o.max)}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -429,6 +474,106 @@ async function loadHistory() {
     data: { labels, datasets: [{ label: brand + ' 100mL당 단가', data, borderColor: '#2563eb', tension: 0.2 }] },
     options: { responsive: true, plugins: { legend: { display: false } } }
   });
+}
+
+// ---------------- 100mL당 가격 탭 (조회 전용) ----------------
+let datesCache = null;
+async function getDatesCache() {
+  if (!datesCache) datesCache = await apiGet('dates');
+  return datesCache;
+}
+
+let per100Initialized = false;
+async function loadPer100Tab() {
+  const sel = document.getElementById('per100Date');
+  if (!per100Initialized) {
+    buildPer100Sections();
+    const dates = await getDatesCache();
+    sel.innerHTML = dates.map(d => `<option value="${d}">${d}</option>`).join('');
+    sel.value = dates[dates.length - 1];
+    sel.addEventListener('change', () => renderPer100Snapshot(sel.value));
+    per100Initialized = true;
+  }
+  renderPer100Snapshot(sel.value);
+}
+
+function buildPer100Sections() {
+  const root = document.getElementById('per100Sections');
+  root.innerHTML = '';
+  CONFIG.capacities.forEach(cap => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `<h2>${cap.label}</h2>`;
+    const wrap = document.createElement('div');
+    wrap.className = 'table-wrap';
+    const table = document.createElement('table');
+    table.id = 'per100_table_' + cap.label;
+    table.dataset.capL = cap.L;
+    const thead = document.createElement('thead');
+    thead.innerHTML = '<tr><th>병수</th>' + CONFIG.brands.map(b => `<th>${b}</th>`).join('') + '</tr>';
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    cap.bottles.forEach(bc => {
+      const tr = document.createElement('tr');
+      tr.dataset.bc = bc;
+      tr.innerHTML = `<td class="rowhead">${bc}</td>` + CONFIG.brands.map(b => `<td data-brand="${b}">-</td>`).join('');
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    card.appendChild(wrap);
+    root.appendChild(card);
+  });
+}
+
+async function renderPer100Snapshot(date) {
+  const res = await apiGet('snapshot', { date });
+  CONFIG.capacities.forEach(cap => {
+    const table = document.getElementById('per100_table_' + cap.label);
+    cap.bottles.forEach(bc => {
+      const tr = table.querySelector(`tr[data-bc="${bc}"]`);
+      CONFIG.brands.forEach(brand => {
+        const td = tr.querySelector(`td[data-brand="${brand}"]`);
+        const v = res.values[keyOf(cap.L, bc, brand)];
+        td.textContent = v ? fmtNum(v.price_per_100ml) : '-';
+      });
+    });
+  });
+}
+
+// ---------------- 브랜드별 탭 (조회 전용) ----------------
+let brandTabInitialized = false;
+async function loadBrandTab() {
+  const brandSel = document.getElementById('brandSelectTab');
+  const dateSel = document.getElementById('brandDate');
+  if (!brandTabInitialized) {
+    brandSel.innerHTML = CONFIG.brands.map(b => `<option value="${b}">${b}</option>`).join('');
+    const dates = await getDatesCache();
+    dateSel.innerHTML = dates.map(d => `<option value="${d}">${d}</option>`).join('');
+    dateSel.value = dates[dates.length - 1];
+    brandSel.addEventListener('change', () => renderBrandTable(brandSel.value, dateSel.value));
+    dateSel.addEventListener('change', () => renderBrandTable(brandSel.value, dateSel.value));
+    brandTabInitialized = true;
+  }
+  renderBrandTable(brandSel.value, dateSel.value);
+}
+
+async function renderBrandTable(brand, date) {
+  const res = await apiGet('snapshot', { date });
+  const tbody = document.querySelector('#brandTable tbody');
+  tbody.innerHTML = '';
+  CONFIG.capacities.forEach(cap => {
+    cap.bottles.forEach(bc => {
+      const v = res.values[keyOf(cap.L, bc, brand)];
+      if (!v) return; // 해당 브랜드가 안 파는 조합은 표시하지 않음
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${cap.label}</td><td>${bc}</td><td>${fmtNum(v.price)}</td><td>${fmtNum(v.price_per_100ml)}</td>`;
+      tbody.appendChild(tr);
+    });
+  });
+  if (tbody.children.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="muted">해당 날짜에 데이터가 없습니다.</td></tr>';
+  }
 }
 
 // ---------------- API 헬퍼 ----------------
