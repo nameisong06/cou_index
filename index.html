@@ -61,7 +61,7 @@
 
 <main>
   <div id="configWarning" style="display:none">
-    ⚠️ API_URL이 설정되지 않았습니다. 이 파일 하단의 <code>const API_URL = "https://script.google.com/macros/s/AKfycbzqn6vMFPqooiUe5GONOIe1v6D1NRv5IqVtyRv2Uziat4wrRVti606GjtTr4cJLG8okzA/exec"</code> 부분에 배포한 Apps Script 웹앱 URL을 넣어주세요.
+    ⚠️ API_URL이 설정되지 않았습니다. 이 파일 하단의 <code>const API_URL = "https://script.google.com/macros/s/AKfycbwbS8SUpFvmUnW_NOPq7d6U4MXdBdJmtNPCbHQ5-t77IeQuPLZPVsowk1pOoLSgM5ieXw/exec"</code> 부분에 배포한 Apps Script 웹앱 URL을 넣어주세요.
   </div>
 
   <section id="tab-input">
@@ -117,7 +117,7 @@
 
 <script>
 /* ====== 설정: 배포한 Apps Script 웹앱 URL을 여기에 넣으세요 ====== */
-const API_URL = "https://script.google.com/macros/s/AKfycbzqn6vMFPqooiUe5GONOIe1v6D1NRv5IqVtyRv2Uziat4wrRVti606GjtTr4cJLG8okzA/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbwbS8SUpFvmUnW_NOPq7d6U4MXdBdJmtNPCbHQ5-t77IeQuPLZPVsowk1pOoLSgM5ieXw/exec";
 /* =============================================================== */
 
 const CONFIG = {
@@ -281,12 +281,23 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     }
   });
   if (entries.length === 0) { alert('입력된 값이 없습니다.'); return; }
+
+  // 저장 전 시점의 gridValues(이전 최신값)와 비교해서 변동 여부를 브라우저에서 직접 계산
+  // (no-cors로 저장하면 서버 응답 내용을 읽을 수 없기 때문)
+  const changedKeys = entries
+    .filter(en => {
+      const k = keyOf(en.capacity_L, en.bottle_count, en.brand);
+      const prev = gridValues[k];
+      return !prev || Number(prev.price) !== Number(en.price);
+    })
+    .map(en => keyOf(en.capacity_L, en.bottle_count, en.brand));
+
   const btn = document.getElementById('saveBtn');
   btn.disabled = true; btn.textContent = '저장 중...';
   try {
-    const res = await apiPost({ action: 'save', date, entries });
-    highlightChanged(res.changedCells || []);
-    showToast(`저장 완료: ${res.savedCount}건 중 ${(res.changedCells||[]).length}건 변동`);
+    await apiPost({ action: 'save', date, entries });
+    highlightChanged(changedKeys);
+    showToast(`저장 완료: ${entries.length}건 중 ${changedKeys.length}건 변동`);
     await loadGrid();
   } catch (err) {
     alert('저장 실패: ' + err);
@@ -419,20 +430,39 @@ async function loadHistory() {
 }
 
 // ---------------- API 헬퍼 ----------------
-async function apiGet(action, params) {
-  const url = new URL(API_URL);
-  url.searchParams.set('action', action);
-  Object.entries(params || {}).forEach(([k,v]) => url.searchParams.set(k, v));
-  const res = await fetch(url);
-  const json = await res.json();
-  if (!json.ok) throw json.error;
-  return json.data;
+// 구글 앱스크립트 웹앱은 fetch로 조회 시 CORS 헤더를 내려주지 않는 경우가 있어
+// 조회(GET)는 JSONP 방식(<script> 태그)으로 우회한다.
+let jsonpCounter = 0;
+function apiGet(action, params) {
+  return new Promise((resolve, reject) => {
+    const cbName = 'jsonp_cb_' + (jsonpCounter++);
+    const url = new URL(API_URL);
+    url.searchParams.set('action', action);
+    Object.entries(params || {}).forEach(([k, v]) => url.searchParams.set(k, v));
+    url.searchParams.set('callback', cbName);
+
+    const script = document.createElement('script');
+    const cleanup = () => { delete window[cbName]; script.remove(); };
+    const timeout = setTimeout(() => { cleanup(); reject('요청 시간 초과'); }, 15000);
+
+    window[cbName] = (json) => {
+      clearTimeout(timeout);
+      cleanup();
+      if (!json.ok) reject(json.error);
+      else resolve(json.data);
+    };
+    script.onerror = () => { clearTimeout(timeout); cleanup(); reject('요청 실패(네트워크 또는 API_URL 오류)'); };
+    script.src = url.toString();
+    document.body.appendChild(script);
+  });
 }
+
+// 저장(쓰기)은 POST가 필요해서 JSONP를 쓸 수 없다. mode:'no-cors'로 보내면
+// 응답 내용은 읽을 수 없지만 서버에는 정상적으로 전달되어 저장은 이루어진다.
 async function apiPost(body) {
-  const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify(body) });
-  const json = await res.json();
-  if (!json.ok) throw json.error;
-  return json.data;
+  await fetch(API_URL, { method: 'POST', body: JSON.stringify(body), mode: 'no-cors' });
+  // no-cors 응답은 내용을 읽을 수 없으므로, 저장 성공으로 간주하고 빈 결과를 돌려준다.
+  return {};
 }
 
 // ---------------- 초기화 ----------------
@@ -442,4 +472,3 @@ if (API_URL) loadGrid();
 </script>
 </body>
 </html>
-
