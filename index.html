@@ -113,17 +113,17 @@
   <section id="tab-brand" style="display:none">
     <div class="card">
       <div class="row">
-        <span class="badge">스파클</span>
+        <select id="baseBrandSelect"></select>
         <span class="muted">vs</span>
         <select id="brandSelectTab"></select>
         <label for="brandDate">조회 날짜</label>
         <select id="brandDate"></select>
-        <span class="muted">노란색 표시 = 스파클이 100mL당 더 비쌈</span>
+        <span class="muted" id="brandCompareNote">노란색 표시 = 기준 브랜드가 100mL당 더 비쌈</span>
       </div>
     </div>
     <div class="card">
       <div class="table-wrap"><table id="brandTable">
-        <thead><tr><th>단량</th><th>병수</th><th>스파클 100mL당</th><th id="brandCompareHeader">비교브랜드 100mL당</th><th>차이</th></tr></thead>
+        <thead><tr><th>단량</th><th>병수</th><th id="brandBaseHeader">스파클 100mL당</th><th id="brandCompareHeader">비교브랜드 100mL당</th><th>차이</th></tr></thead>
         <tbody></tbody>
       </table></div>
     </div>
@@ -506,32 +506,49 @@ async function renderPer100Snapshot(date) {
   });
 }
 
-// ---------------- 브랜드별 탭 (스파클 vs 비교브랜드, 조회 전용) ----------------
+// ---------------- 브랜드별 탭 (기준 브랜드 vs 비교브랜드, 조회 전용) ----------------
+// 기준 브랜드는 자사 브랜드들(스파클/미라클) 중에서 고를 수 있음
+const OWN_BRANDS = ['스파클', '미라클'];
+
 let brandTabInitialized = false;
 async function loadBrandTab() {
+  const baseSel = document.getElementById('baseBrandSelect');
   const brandSel = document.getElementById('brandSelectTab');
   const dateSel = document.getElementById('brandDate');
-  if (!brandTabInitialized) {
-    const compareBrands = CONFIG.brands.filter(b => b !== CONFIG.ownBrand);
+
+  function refreshCompareOptions() {
+    const compareBrands = CONFIG.brands.filter(b => b !== baseSel.value);
+    const prev = brandSel.value;
     brandSel.innerHTML = compareBrands.map(b => `<option value="${b}">${b}</option>`).join('');
+    if (compareBrands.includes(prev)) brandSel.value = prev;
+  }
+
+  if (!brandTabInitialized) {
+    baseSel.innerHTML = OWN_BRANDS.map(b => `<option value="${b}">${b}</option>`).join('');
+    refreshCompareOptions();
     const dates = await getDatesCache();
     dateSel.innerHTML = dates.map(d => `<option value="${d}">${d}</option>`).join('');
     dateSel.value = dates[dates.length - 1];
-    brandSel.addEventListener('change', () => renderBrandTable(brandSel.value, dateSel.value));
-    dateSel.addEventListener('change', () => renderBrandTable(brandSel.value, dateSel.value));
+
+    baseSel.addEventListener('change', () => { refreshCompareOptions(); renderBrandTable(baseSel.value, brandSel.value, dateSel.value); });
+    brandSel.addEventListener('change', () => renderBrandTable(baseSel.value, brandSel.value, dateSel.value));
+    dateSel.addEventListener('change', () => renderBrandTable(baseSel.value, brandSel.value, dateSel.value));
     brandTabInitialized = true;
   }
-  renderBrandTable(brandSel.value, dateSel.value);
+  renderBrandTable(baseSel.value, brandSel.value, dateSel.value);
 }
 
-async function renderBrandTable(compareBrand, date) {
+async function renderBrandTable(baseBrand, compareBrand, date) {
+  document.getElementById('brandBaseHeader').textContent = baseBrand + ' 100mL당';
   document.getElementById('brandCompareHeader').textContent = compareBrand + ' 100mL당';
+  document.getElementById('brandCompareNote').textContent = `노란색 표시 = ${baseBrand}이(가) 100mL당 더 비쌈`;
+
   const res = await apiGet('snapshot', { date });
   const tbody = document.querySelector('#brandTable tbody');
   tbody.innerHTML = '';
   CONFIG.capacities.forEach(cap => {
     cap.bottles.forEach(bc => {
-      const own = res.values[keyOf(cap.L, bc, CONFIG.ownBrand)];
+      const own = res.values[keyOf(cap.L, bc, baseBrand)];
       const other = res.values[keyOf(cap.L, bc, compareBrand)];
       if (!own && !other) return; // 둘 다 없는 조합은 표시하지 않음
       const ownPer100 = own ? own.price_per_100ml : null;
