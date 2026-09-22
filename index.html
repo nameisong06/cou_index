@@ -37,6 +37,8 @@
   .toast.show { opacity: 0.95; }
   .up { color: var(--up); font-weight: 600; }
   .down { color: var(--down); font-weight: 600; }
+  .pdiff-up { color: #2563eb; font-weight: 700; }   /* 전일대비 +1원 이상 상승: 파란색 */
+  .pdiff-down { color: #dc2626; font-weight: 700; } /* 전일대비 -1원 이상 하락: 빨간색 */
   .muted { color: var(--muted); font-size: 12px; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
@@ -102,7 +104,7 @@
       <div class="row">
         <label for="per100Date">조회 날짜</label>
         <select id="per100Date"></select>
-        <span class="muted">단량별 표에 100mL당 단가만 표시합니다 (조회 전용).</span>
+        <span class="muted">단량별 표에 100mL당 단가만 표시합니다 (조회 전용). <span class="pdiff-up">파란색</span>=전일대비 1원 이상 상승, <span class="pdiff-down">빨간색</span>=1원 이상 하락</span>
       </div>
     </div>
     <div id="per100Sections"></div>
@@ -470,15 +472,35 @@ function buildPer100Sections() {
 }
 
 async function renderPer100Snapshot(date) {
-  const res = await apiGet('snapshot', { date });
+  const dates = await getDatesCache();
+  const idx = dates.indexOf(date);
+  const prevDate = idx > 0 ? dates[idx - 1] : null;
+
+  const [res, prevRes] = await Promise.all([
+    apiGet('snapshot', { date }),
+    prevDate ? apiGet('snapshot', { date: prevDate }) : Promise.resolve({ values: {} })
+  ]);
+
   CONFIG.capacities.forEach(cap => {
     const table = document.getElementById('per100_table_' + cap.label);
     cap.bottles.forEach(bc => {
       const tr = table.querySelector(`tr[data-bc="${bc}"]`);
       CONFIG.brands.forEach(brand => {
         const td = tr.querySelector(`td[data-brand="${brand}"]`);
-        const v = res.values[keyOf(cap.L, bc, brand)];
-        td.textContent = v ? fmtNum(v.price_per_100ml) : '-';
+        const k = keyOf(cap.L, bc, brand);
+        const v = res.values[k];
+        const pv = prevRes.values[k];
+        td.classList.remove('pdiff-up', 'pdiff-down');
+        if (!v) {
+          td.textContent = '-';
+          return;
+        }
+        td.textContent = fmtNum(v.price_per_100ml);
+        if (pv) {
+          const diff = v.price_per_100ml - pv.price_per_100ml;
+          if (diff >= 1) td.classList.add('pdiff-up');
+          else if (diff <= -1) td.classList.add('pdiff-down');
+        }
       });
     });
   });
