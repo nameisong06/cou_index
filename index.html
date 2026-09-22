@@ -62,7 +62,7 @@
 
 <main>
   <div id="configWarning" style="display:none">
-    ⚠️ API_URL이 설정되지 않았습니다. 이 파일 하단의 <code>const API_URL = "https://script.google.com/macros/s/AKfycbxM4qBmET1c40UrR66alx0WXaz_kZA4yLVSM2VZtT4CQpNGVjXxsL4zHYtwXtyabgxCig/exec"</code> 부분에 배포한 Apps Script 웹앱 URL을 넣어주세요.
+    ⚠️ API_URL이 설정되지 않았습니다. 이 파일 하단의 <code>const API_URL = "https://script.google.com/macros/s/AKfycby7bf8yTwc5uvfUlbLLkvL4Ck3YmFnE7DhwWeQkV2oDSCT0A6aeOM1zIIl9k9jwx_hO2Q/exec"</code> 부분에 배포한 Apps Script 웹앱 URL을 넣어주세요.
   </div>
 
   <section id="tab-input">
@@ -83,7 +83,11 @@
     <p class="muted" id="sumDates" style="margin:0 0 4px"></p>
     <div class="grid2">
       <div class="card">
-        <h2>🏆 단량별 100mL당 단가 랭킹</h2>
+        <h2>🏆 100mL당 단가 랭킹</h2>
+        <div class="row" style="margin-bottom:10px">
+          <select id="rankCapacity"></select>
+          <select id="rankBottle"></select>
+        </div>
         <div id="rankingBox"></div>
       </div>
       <div class="card">
@@ -128,7 +132,7 @@
 
 <script>
 /* ====== 설정: 배포한 Apps Script 웹앱 URL을 여기에 넣으세요 ====== */
-const API_URL = "https://script.google.com/macros/s/AKfycbxM4qBmET1c40UrR66alx0WXaz_kZA4yLVSM2VZtT4CQpNGVjXxsL4zHYtwXtyabgxCig/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycby7bf8yTwc5uvfUlbLLkvL4Ck3YmFnE7DhwWeQkV2oDSCT0A6aeOM1zIIl9k9jwx_hO2Q/exec";
 /* =============================================================== */
 
 const CONFIG = {
@@ -345,43 +349,74 @@ function highlightChanged(keys) {
 }
 
 // ---------------- 요약 탭 ----------------
+let summaryValues = {};
+let rankSelectorsInitialized = false;
+
 async function loadSummary() {
   document.getElementById('sumDates').textContent = '불러오는 중...';
   const res = await apiGet('summary');
   document.getElementById('sumDates').textContent = res.latestDate ? `기준일: ${res.latestDate}` : '데이터 없음';
-  renderRanking(res.ranking);
+  summaryValues = res.values || {};
+
+  if (!rankSelectorsInitialized) {
+    const capSel = document.getElementById('rankCapacity');
+    const bcSel = document.getElementById('rankBottle');
+    capSel.innerHTML = CONFIG.capacities.map(c => `<option value="${c.L}">${c.label}</option>`).join('');
+    function refreshBottles() {
+      const cap = CONFIG.capacities.find(c => String(c.L) === capSel.value);
+      bcSel.innerHTML = cap.bottles.map(b => `<option value="${b}">${b}병</option>`).join('');
+    }
+    refreshBottles();
+    capSel.addEventListener('change', () => { refreshBottles(); renderRanking(); });
+    bcSel.addEventListener('change', renderRanking);
+    rankSelectorsInitialized = true;
+  }
+
+  renderRanking();
   renderOwnPosition(res.ownPosition);
 }
 
-function renderRanking(ranking) {
+function renderRanking() {
+  const capL = parseFloat(document.getElementById('rankCapacity').value);
+  const bc = Number(document.getElementById('rankBottle').value);
   const box = document.getElementById('rankingBox');
   box.innerHTML = '';
-  (ranking || []).forEach(r => {
-    const h = document.createElement('div');
-    h.innerHTML = `<span class="badge">${r.capacity_label} · ${r.bottle_count}병</span>`;
-    h.style.margin = '10px 0 6px';
-    box.appendChild(h);
-    const ul = document.createElement('ul');
-    ul.className = 'rank-list';
-    r.list.forEach((item, idx) => {
-      const li = document.createElement('li');
-      if (item.brand === CONFIG.ownBrand) li.classList.add('own');
-      li.innerHTML = `<span>${idx+1}. ${item.brand}</span><span>${fmtNum(item.price_per_100ml)}</span>`;
-      ul.appendChild(li);
-    });
-    box.appendChild(ul);
+
+  const list = CONFIG.brands
+    .map(b => ({ brand: b, v: summaryValues[keyOf(capL, bc, b)] }))
+    .filter(x => x.v)
+    .sort((a, b) => a.v.price_per_100ml - b.v.price_per_100ml);
+
+  if (list.length === 0) {
+    box.innerHTML = '<p class="muted">해당 조합의 데이터가 없습니다.</p>';
+    return;
+  }
+  const ul = document.createElement('ul');
+  ul.className = 'rank-list';
+  list.forEach((item, idx) => {
+    const li = document.createElement('li');
+    if (item.brand === CONFIG.ownBrand) li.classList.add('own');
+    li.innerHTML = `<span>${idx+1}. ${item.brand}</span><span>${fmtNum(item.v.price_per_100ml)}</span>`;
+    ul.appendChild(li);
   });
+  box.appendChild(ul);
 }
 
 function renderOwnPosition(ownPosition) {
   const tbody = document.querySelector('#ownTable tbody');
   tbody.innerHTML = '';
   (ownPosition || []).forEach(o => {
+    const rankBadgeColor = o.rank === 1 ? '#16a34a' : (o.rank === o.total + 1 ? '#dc2626' : 'var(--accent)');
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${o.capacity_label}</td><td>${o.bottle_count}</td><td>${fmtNum(o.own_per100)}</td>
-      <td>${o.rank}/${o.total+1}</td><td>${fmtNum(o.min)}</td><td>${fmtNum(o.avg)}</td><td>${fmtNum(o.max)}</td>`;
+    tr.innerHTML = `<td>${o.capacity_label}</td><td>${o.bottle_count}</td>
+      <td style="font-weight:800; color:var(--accent); font-size:14px">${fmtNum(o.own_per100)}</td>
+      <td><span style="font-weight:800; color:${rankBadgeColor}">${o.rank}위</span> <span class="muted">/ ${o.total+1}개</span></td>
+      <td>${fmtNum(o.min)}</td><td>${fmtNum(o.avg)}</td><td>${fmtNum(o.max)}</td>`;
     tbody.appendChild(tr);
   });
+  if (tbody.children.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="muted">해당 날짜에 스파클 데이터가 없습니다.</td></tr>';
+  }
 }
 
 // ---------------- 100mL당 가격 탭 (조회 전용) ----------------
