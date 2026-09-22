@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>생수(쿠팡) 가격 모니터링</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
   :root {
     --bg: #f6f7f9; --card: #ffffff; --text: #1c1f24; --muted: #6b7280;
@@ -63,7 +62,7 @@
 
 <main>
   <div id="configWarning" style="display:none">
-    ⚠️ API_URL이 설정되지 않았습니다. 이 파일 하단의 <code>const API_URL = "https://script.google.com/macros/s/AKfycbzc-VES6rlSNNd1Jg3fhU0jG7TJDBII5BRA4rk6Ve5LLoFoij691mhumcMUj1id9iyP/exec"</code> 부분에 배포한 Apps Script 웹앱 URL을 넣어주세요.
+    ⚠️ API_URL이 설정되지 않았습니다. 이 파일 하단의 <code>const API_URL = "https://script.google.com/macros/s/AKfycbxM4qBmET1c40UrR66alx0WXaz_kZA4yLVSM2VZtT4CQpNGVjXxsL4zHYtwXtyabgxCig/exec"</code> 부분에 배포한 Apps Script 웹앱 URL을 넣어주세요.
   </div>
 
   <section id="tab-input">
@@ -81,12 +80,7 @@
   </section>
 
   <section id="tab-summary" style="display:none">
-    <div class="card">
-      <h2>📋 오늘의 변동 리스트 (<span id="sumDates"></span>)</h2>
-      <div class="table-wrap"><table id="changesTable"><thead><tr><th>단량</th><th>병수</th><th>브랜드</th><th>어제 100mL당</th><th>오늘 100mL당</th><th>변동</th></tr></thead><tbody></tbody></table></div>
-      <p class="muted" id="noChanges" style="display:none">전일 대비 변동된 항목이 없습니다.</p>
-    </div>
-
+    <p class="muted" id="sumDates" style="margin:0 0 4px"></p>
     <div class="grid2">
       <div class="card">
         <h2>🏆 단량별 100mL당 단가 랭킹</h2>
@@ -96,21 +90,6 @@
         <h2>⭐ 자사(스파클) 포지션</h2>
         <div class="table-wrap"><table id="ownTable"><thead><tr><th>단량</th><th>병수</th><th>스파클</th><th>순위</th><th>최저</th><th>평균</th><th>최고</th></tr></thead><tbody></tbody></table></div>
       </div>
-    </div>
-
-    <div class="card">
-      <h2>🔁 최근 변동 빈도 (최근 <span id="freqDays"></span>회 기록 기준)</h2>
-      <ul class="rank-list" id="freqList"></ul>
-    </div>
-
-    <div class="card">
-      <h2>📈 브랜드별 추이</h2>
-      <div class="row" style="margin-bottom:10px">
-        <select id="histCapacity"></select>
-        <select id="histBottle"></select>
-        <select id="histBrand"></select>
-      </div>
-      <canvas id="histChart" height="90"></canvas>
     </div>
   </section>
 
@@ -128,14 +107,19 @@
   <section id="tab-brand" style="display:none">
     <div class="card">
       <div class="row">
-        <label for="brandSelectTab">브랜드</label>
+        <span class="badge">스파클</span>
+        <span class="muted">vs</span>
         <select id="brandSelectTab"></select>
         <label for="brandDate">조회 날짜</label>
         <select id="brandDate"></select>
+        <span class="muted">노란색 표시 = 스파클이 100mL당 더 비쌈</span>
       </div>
     </div>
     <div class="card">
-      <div class="table-wrap"><table id="brandTable"><thead><tr><th>단량</th><th>병수</th><th>가격</th><th>100mL당</th></tr></thead><tbody></tbody></table></div>
+      <div class="table-wrap"><table id="brandTable">
+        <thead><tr><th>단량</th><th>병수</th><th>스파클 100mL당</th><th id="brandCompareHeader">비교브랜드 100mL당</th><th>차이</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
     </div>
   </section>
 </main>
@@ -144,7 +128,7 @@
 
 <script>
 /* ====== 설정: 배포한 Apps Script 웹앱 URL을 여기에 넣으세요 ====== */
-const API_URL = "https://script.google.com/macros/s/AKfycbzc-VES6rlSNNd1Jg3fhU0jG7TJDBII5BRA4rk6Ve5LLoFoij691mhumcMUj1id9iyP/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbxM4qBmET1c40UrR66alx0WXaz_kZA4yLVSM2VZtT4CQpNGVjXxsL4zHYtwXtyabgxCig/exec";
 /* =============================================================== */
 
 const CONFIG = {
@@ -361,43 +345,12 @@ function highlightChanged(keys) {
 }
 
 // ---------------- 요약 탭 ----------------
-let summaryLoaded = false;
-let histChartInstance = null;
-
 async function loadSummary() {
-  document.getElementById('sumDates').textContent = '불러오는 중... (최대 45초 정도 걸릴 수 있어요)';
-  const res = await apiGet('summary', { days: 10 });
-  renderChanges(res);
+  document.getElementById('sumDates').textContent = '불러오는 중...';
+  const res = await apiGet('summary');
+  document.getElementById('sumDates').textContent = res.latestDate ? `기준일: ${res.latestDate}` : '데이터 없음';
   renderRanking(res.ranking);
   renderOwnPosition(res.ownPosition);
-  renderFrequency(res.changeFrequency);
-  if (!summaryLoaded) {
-    setupHistorySelectors();
-    summaryLoaded = true;
-  }
-}
-
-function renderChanges(res) {
-  document.getElementById('sumDates').textContent = res.prevDate ? `${res.prevDate} → ${res.latestDate}` : (res.latestDate || '-');
-  const tbody = document.querySelector('#changesTable tbody');
-  tbody.innerHTML = '';
-  const noChanges = document.getElementById('noChanges');
-  if (!res.changes || res.changes.length === 0) {
-    noChanges.style.display = 'block';
-    return;
-  }
-  noChanges.style.display = 'none';
-  res.changes
-    .sort((a,b) => Math.abs(b.cur_per100-b.prev_per100) - Math.abs(a.cur_per100-a.prev_per100))
-    .forEach(c => {
-      const capLabel = CONFIG.capacities.find(cap => Math.abs(cap.L - c.capacity_L) < 0.001)?.label || c.capacity_L;
-      const diff = c.cur_per100 - c.prev_per100;
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${capLabel}</td><td>${c.bottle_count}</td><td>${c.brand}</td>
-        <td>${fmtNum(c.prev_per100)}</td><td>${fmtNum(c.cur_per100)}</td>
-        <td class="${diff>0?'up':'down'}">${diff>0?'▲':'▼'} ${fmtNum(Math.abs(diff).toFixed(2))}</td>`;
-      tbody.appendChild(tr);
-    });
 }
 
 function renderRanking(ranking) {
@@ -428,51 +381,6 @@ function renderOwnPosition(ownPosition) {
     tr.innerHTML = `<td>${o.capacity_label}</td><td>${o.bottle_count}</td><td>${fmtNum(o.own_per100)}</td>
       <td>${o.rank}/${o.total+1}</td><td>${fmtNum(o.min)}</td><td>${fmtNum(o.avg)}</td><td>${fmtNum(o.max)}</td>`;
     tbody.appendChild(tr);
-  });
-}
-
-function renderFrequency(list) {
-  document.getElementById('freqDays').textContent = 10;
-  const ul = document.getElementById('freqList');
-  ul.innerHTML = '';
-  (list || []).forEach(f => {
-    const li = document.createElement('li');
-    if (f.brand === CONFIG.ownBrand) li.classList.add('own');
-    li.innerHTML = `<span>${f.brand}</span><span>${f.count}회</span>`;
-    ul.appendChild(li);
-  });
-}
-
-function setupHistorySelectors() {
-  const capSel = document.getElementById('histCapacity');
-  const bcSel = document.getElementById('histBottle');
-  const brandSel = document.getElementById('histBrand');
-  capSel.innerHTML = CONFIG.capacities.map(c => `<option value="${c.L}">${c.label}</option>`).join('');
-  brandSel.innerHTML = CONFIG.brands.map(b => `<option value="${b}">${b}</option>`).join('');
-  function refreshBottles() {
-    const cap = CONFIG.capacities.find(c => String(c.L) === capSel.value);
-    bcSel.innerHTML = cap.bottles.map(b => `<option value="${b}">${b}병</option>`).join('');
-  }
-  refreshBottles();
-  capSel.addEventListener('change', () => { refreshBottles(); loadHistory(); });
-  bcSel.addEventListener('change', loadHistory);
-  brandSel.addEventListener('change', loadHistory);
-  loadHistory();
-}
-
-async function loadHistory() {
-  const capL = document.getElementById('histCapacity').value;
-  const bc = document.getElementById('histBottle').value;
-  const brand = document.getElementById('histBrand').value;
-  const res = await apiGet('history', { capacity_L: capL, bottle_count: bc, brand });
-  const ctx = document.getElementById('histChart');
-  const labels = res.map(r => r.date);
-  const data = res.map(r => r.price_per_100ml);
-  if (histChartInstance) histChartInstance.destroy();
-  histChartInstance = new Chart(ctx, {
-    type: 'line',
-    data: { labels, datasets: [{ label: brand + ' 100mL당 단가', data, borderColor: '#2563eb', tension: 0.2 }] },
-    options: { responsive: true, plugins: { legend: { display: false } } }
   });
 }
 
@@ -541,13 +449,14 @@ async function renderPer100Snapshot(date) {
   });
 }
 
-// ---------------- 브랜드별 탭 (조회 전용) ----------------
+// ---------------- 브랜드별 탭 (스파클 vs 비교브랜드, 조회 전용) ----------------
 let brandTabInitialized = false;
 async function loadBrandTab() {
   const brandSel = document.getElementById('brandSelectTab');
   const dateSel = document.getElementById('brandDate');
   if (!brandTabInitialized) {
-    brandSel.innerHTML = CONFIG.brands.map(b => `<option value="${b}">${b}</option>`).join('');
+    const compareBrands = CONFIG.brands.filter(b => b !== CONFIG.ownBrand);
+    brandSel.innerHTML = compareBrands.map(b => `<option value="${b}">${b}</option>`).join('');
     const dates = await getDatesCache();
     dateSel.innerHTML = dates.map(d => `<option value="${d}">${d}</option>`).join('');
     dateSel.value = dates[dates.length - 1];
@@ -558,21 +467,30 @@ async function loadBrandTab() {
   renderBrandTable(brandSel.value, dateSel.value);
 }
 
-async function renderBrandTable(brand, date) {
+async function renderBrandTable(compareBrand, date) {
+  document.getElementById('brandCompareHeader').textContent = compareBrand + ' 100mL당';
   const res = await apiGet('snapshot', { date });
   const tbody = document.querySelector('#brandTable tbody');
   tbody.innerHTML = '';
   CONFIG.capacities.forEach(cap => {
     cap.bottles.forEach(bc => {
-      const v = res.values[keyOf(cap.L, bc, brand)];
-      if (!v) return; // 해당 브랜드가 안 파는 조합은 표시하지 않음
+      const own = res.values[keyOf(cap.L, bc, CONFIG.ownBrand)];
+      const other = res.values[keyOf(cap.L, bc, compareBrand)];
+      if (!own && !other) return; // 둘 다 없는 조합은 표시하지 않음
+      const ownPer100 = own ? own.price_per_100ml : null;
+      const otherPer100 = other ? other.price_per_100ml : null;
+      const higher = (ownPer100 !== null && otherPer100 !== null && ownPer100 > otherPer100);
+      const diff = (ownPer100 !== null && otherPer100 !== null) ? ownPer100 - otherPer100 : null;
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${cap.label}</td><td>${bc}</td><td>${fmtNum(v.price)}</td><td>${fmtNum(v.price_per_100ml)}</td>`;
+      tr.innerHTML = `<td>${cap.label}</td><td>${bc}</td>
+        <td class="${higher ? 'changed' : ''}">${ownPer100 !== null ? fmtNum(ownPer100) : '-'}</td>
+        <td>${otherPer100 !== null ? fmtNum(otherPer100) : '-'}</td>
+        <td class="${diff===null?'':(diff>0?'up':'down')}">${diff===null ? '-' : (diff>0?'▲ ':'▼ ') + fmtNum(Math.abs(diff).toFixed(2))}</td>`;
       tbody.appendChild(tr);
     });
   });
   if (tbody.children.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" class="muted">해당 날짜에 데이터가 없습니다.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="muted">해당 날짜에 데이터가 없습니다.</td></tr>';
   }
 }
 
