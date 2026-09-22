@@ -62,7 +62,7 @@
 
 <main>
   <div id="configWarning" style="display:none">
-    ⚠️ API_URL이 설정되지 않았습니다. 이 파일 하단의 <code>const API_URL = "https://script.google.com/macros/s/AKfycby7bf8yTwc5uvfUlbLLkvL4Ck3YmFnE7DhwWeQkV2oDSCT0A6aeOM1zIIl9k9jwx_hO2Q/exec"</code> 부분에 배포한 Apps Script 웹앱 URL을 넣어주세요.
+    ⚠️ API_URL이 설정되지 않았습니다. 이 파일 하단의 <code>const API_URL = "https://script.google.com/macros/s/AKfycbwKcWtcw4xrxERx3xkDtbLHyQMRVIj2t4pHet2tH9EsrTEJKFBHwdu6dbg9l2V0MePw2g/exec"</code> 부분에 배포한 Apps Script 웹앱 URL을 넣어주세요.
   </div>
 
   <section id="tab-input">
@@ -132,7 +132,7 @@
 
 <script>
 /* ====== 설정: 배포한 Apps Script 웹앱 URL을 여기에 넣으세요 ====== */
-const API_URL = "https://script.google.com/macros/s/AKfycby7bf8yTwc5uvfUlbLLkvL4Ck3YmFnE7DhwWeQkV2oDSCT0A6aeOM1zIIl9k9jwx_hO2Q/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbwKcWtcw4xrxERx3xkDtbLHyQMRVIj2t4pHet2tH9EsrTEJKFBHwdu6dbg9l2V0MePw2g/exec";
 /* =============================================================== */
 
 const CONFIG = {
@@ -150,7 +150,7 @@ const CONFIG = {
 if (!API_URL) document.getElementById('configWarning').style.display = 'block';
 
 function keyOf(capL, bc, brand) { return capL + '|' + bc + '|' + brand; }
-function per100(price, capL) { return Math.round((price / (capL*1000/100)) * 100) / 100; }
+function per100(price, capL, bc) { return Math.round((price / (capL*bc*1000/100)) * 100) / 100; }
 function fmtNum(n) { return (n === null || n === undefined || isNaN(n)) ? '' : Number(n).toLocaleString('ko-KR'); }
 function parseNum(s) { const v = parseFloat(String(s).replace(/,/g, '')); return isNaN(v) ? NaN : v; }
 function todayStr() {
@@ -249,7 +249,7 @@ function updatePer100Label(td, input) {
   const per = td.querySelector('.per100');
   const v = parseNum(input.value);
   if (!isNaN(v) && v > 0) {
-    per.textContent = fmtNum(per100(v, parseFloat(input.dataset.capL))) + '/100mL';
+    per.textContent = fmtNum(per100(v, parseFloat(input.dataset.capL), Number(input.dataset.bc))) + '/100mL';
   } else {
     per.textContent = '';
   }
